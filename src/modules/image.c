@@ -63,81 +63,71 @@ DRAW_COMMAND_execute(ENGINE* engine, DRAW_COMMAND* commandPtr) {
   VEC dest = command.dest;
 
   double angle = command.angle;
+  double rad = angle * M_PI / 180.0;
   VEC scale = command.scale;
 
   uint32_t* pixel = (uint32_t*)image->pixels;
   pixel = pixel + (src.y * image->width + src.x);
 
-
-  int direction = round(angle / 90);
-  direction %= 4;
-  if(direction < 0) direction += 4;
-
   double sX = (1.0 / scale.x);
   double sY = (1.0 / scale.y);
 
-  if (direction >= 0) {
-    double swap;
-    sX = fabs(sX);
-    sY = fabs(sY);
+  double swap;
+  sX = fabs(sX);
+  sY = fabs(sY);
 
-    int32_t w = (srcW) * fabs(scale.x);
-    int32_t h = (srcH) * fabs(scale.y);
+  /* multiplication by 3 emulates a simple Scale3x algorithm */
+  int32_t w = (srcW) * fabs(scale.x) * 3;
+  int32_t h = (srcH) * fabs(scale.y) * 3;
 
-    if (direction & 1) {
-      swap = w;
-      w = h;
-      h = swap;
-    }
-    for (int32_t j = 0; j < h; j++) {
-      for (int32_t i = 0; i < w; i++) {
+  for (int32_t j = 0; j < h; j++) {
+    for (int32_t i = 0; i < w; i++) {
 
-        int32_t x = dest.x + i;
-        int32_t y = dest.y + j;
+      int32_t x = i;
+      int32_t y = j;
 
-        double q = i * sX;
-        double t = j * sY;
+      /* only flip on negative scales, otherwise the rotation code handles it */
+      if (scale.y < 0) {
+        y = (h-1) - j;
+      }
+      if (scale.x < 0) {
+        x = (w-1) - i;
+      }
 
-        int32_t u = (q);
-        int32_t v = (t);
+      int32_t rx = x * cos(rad) - y * sin(rad);
+      int32_t ry = x * sin(rad) + y * cos(rad);
 
-        if ((scale.y > 0 && direction >= 2) || (scale.y < 0 && direction < 2)) {
-          y = dest.y + (h-1) - j;
-        }
+      /* division by 3 is necessary to shrink the pixels to correct coords */
+      x = dest.x + rx / 3;
+      y = dest.y + ry / 3;
 
-        bool flipX = ((direction == 1 || direction == 2));
-        if ((scale.x < 0 && !flipX) || (scale.x > 0 && flipX)) {
-          x = dest.x + (w-1) - i;
-        }
+      double q = i * sX / 3.0;
+      double t = j * sY / 3.0;
 
-        if (direction & 1) {
-          swap = u;
-          u = v;
-          v = swap;
-        }
+      int32_t u = (q);
+      int32_t v = (t);
 
-        // Prevent out-of-bounds access
-        if ((src.x + u) < 0 || (src.x + u) >= image->width || (src.y + v) < 0 || (src.y + v) >= image->height) {
-          continue;
-        }
+      // Prevent out-of-bounds access
+      if ((src.x + u) < 0 || (src.x + u) >= image->width || (src.y + v) < 0 || (src.y + v) >= image->height) {
+        continue;
+      }
 
-        uint32_t preColor = *(pixel + (v * image->width + u));
-        uint32_t color = preColor;
-        uint8_t alpha = (0xFF000000 & color) >> 24;
-        if (command.mode == COLOR_MODE_MONO) {
-          if (alpha < 0xFF || (color & 0x00FFFFFF) == 0) {
-            color = command.backgroundColor;
-          } else {
-            color = command.foregroundColor;
-          }
+      uint32_t preColor = *(pixel + (v * image->width + u));
+      uint32_t color = preColor;
+      uint8_t alpha = (0xFF000000 & color) >> 24;
+      if (command.mode == COLOR_MODE_MONO) {
+        if (alpha < 0xFF || (color & 0x00FFFFFF) == 0) {
+          color = command.backgroundColor;
         } else {
-          color = ((uint8_t)(alpha * command.opacity) << 24) | (preColor & 0x00FFFFFF);
+          color = command.foregroundColor;
         }
-        ENGINE_pset(engine, x, y, color);
-        // Only apply the tint on visible pixels
-        if (command.tintColor != 0 && color != 0 && (alpha * command.opacity) != 0) {
-          ENGINE_pset(engine, x, y, command.tintColor);
-        }
+      } else {
+        color = ((uint8_t)(alpha * command.opacity) << 24) | (preColor & 0x00FFFFFF);
+      }
+      ENGINE_pset(engine, x, y, color);
+      // Only apply the tint on visible pixels
+      if (command.tintColor != 0 && color != 0 && (alpha * command.opacity) != 0) {
+        ENGINE_pset(engine, x, y, command.tintColor);
       }
     }
   }
